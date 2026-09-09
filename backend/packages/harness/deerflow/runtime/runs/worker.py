@@ -344,6 +344,30 @@ def _delivery_error(content: dict[str, Any]) -> str | None:
     return _DELIVERY_INCOMPLETE_ERROR
 
 
+_REASONING_EXHAUSTED_ERROR = (
+    "Model exhausted its reasoning budget without producing user-facing "
+    "content or executing any tool ({llm_calls} LLM call(s)): run delivered "
+    "nothing despite reporting completion."
+)
+
+
+def _reasoning_exhaustion_error(journal: Any | None) -> str | None:
+    """Detect silent reasoning-exhaustion: reasoning truncated mid-stream,
+    ``finish_reason: stop``, zero content, zero tool calls — previously sealed
+    as ``success`` and indistinguishable from a real success at HTTP level.
+    Returns an error message, or None when the run shows genuine activity."""
+    if journal is None:
+        return None
+    try:
+        exhausted = journal.reasoning_exhausted_without_output()
+    except AttributeError:
+        return None
+    if not exhausted:
+        return None
+    llm_calls = getattr(journal, "_llm_call_count", "?")
+    return _REASONING_EXHAUSTED_ERROR.format(llm_calls=llm_calls)
+
+
 def _workspace_excluded_dir_names(app_config: AppConfig | None) -> frozenset[str]:
     """Directory names workspace snapshots must skip for this deployment.
 
@@ -1351,10 +1375,19 @@ async def run_agent(
                 produced_output_paths,
             )
             delivery_error = _delivery_error(delivery_content)
+            # Silent reasoning-exhaustion: reasoning truncated mid-stream with
+            # zero content and zero tool calls previously sealed as success.
+            # Surface it as an error so callers can distinguish it from a
+            # genuine success instead of consuming an empty run as valid.
+            reasoning_error = None if delivery_error else _reasoning_exhaustion_error(journal)
+            terminal_error = delivery_error or reasoning_error
+            if reasoning_error is not None:
+                logger.warning("Run %s sealed as error: %s", run_id, reasoning_error)
+                stop_reason = stop_reason or "reasoning_exhausted"
             cancel_action = await run_manager.set_status_if_not_cancelled(
                 run_id,
-                RunStatus.error if delivery_error else RunStatus.success,
-                error=delivery_error,
+                RunStatus.error if terminal_error else RunStatus.success,
+                error=terminal_error,
                 stop_reason=stop_reason,
                 **terminal_status_kwargs,
             )

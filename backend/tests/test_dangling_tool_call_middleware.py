@@ -1204,3 +1204,59 @@ class TestAwrapModelCall:
 
         handler.assert_called_once_with(patched_request)
         assert result == "response"
+
+
+class TestBlankToolNameExecutionGuard:
+    """Blank-name tool calls must be short-circuited at execution time.
+
+    Regression test for runs killed by Qwen-style
+    ``{"name": "", "args": {...}, "id": null}`` emissions: without this
+    guard LangGraph's ToolNode rejects them and the run dies with an
+    error and no message in the stream.
+    """
+
+    def _request(self, name, args=None, call_id="call_1"):
+        request = MagicMock()
+        request.tool_call = {"name": name, "args": args or {}, "id": call_id}
+        return request
+
+    def test_blank_name_returns_synthetic_error_without_executing(self):
+        mw = DanglingToolCallMiddleware()
+        handler = MagicMock(return_value="executed")
+
+        result = mw.wrap_tool_call(self._request(""), handler)
+
+        handler.assert_not_called()
+        assert isinstance(result, ToolMessage)
+        assert "name was missing or empty" in result.content
+        # Valid ids are preserved so the error pairs with the original call.
+        assert result.tool_call_id == "call_1"
+
+    def test_null_id_gets_synthetic_id(self):
+        mw = DanglingToolCallMiddleware()
+        handler = MagicMock(return_value="executed")
+
+        result = mw.wrap_tool_call(self._request("  ", call_id=None), handler)
+
+        handler.assert_not_called()
+        assert isinstance(result, ToolMessage)
+        assert result.tool_call_id
+
+    def test_valid_name_passes_through(self):
+        mw = DanglingToolCallMiddleware()
+        handler = MagicMock(return_value="executed")
+
+        result = mw.wrap_tool_call(self._request("web_search"), handler)
+
+        handler.assert_called_once()
+        assert result == "executed"
+
+    @pytest.mark.anyio
+    async def test_async_blank_name_guarded(self):
+        mw = DanglingToolCallMiddleware()
+        handler = AsyncMock(return_value="executed")
+
+        result = await mw.awrap_tool_call(self._request(""), handler)
+
+        handler.assert_not_called()
+        assert isinstance(result, ToolMessage)

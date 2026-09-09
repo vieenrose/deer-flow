@@ -2218,3 +2218,36 @@ class TestDeliveryTracking:
         assert content["presented"] == 1
         assert content["paths"] == ["/mnt/user-data/outputs/anon.txt"]
         assert content["by_tool"] == {}
+
+
+class TestReasoningExhaustionSignal:
+    """reasoning_exhausted_without_output must flag only the silent
+    reasoning-exhaustion signature: LLM calls burned, zero user-facing
+    content, zero tool executions."""
+
+    def _journal(self):
+        from deerflow.runtime.journal import RunJournal
+
+        store = MemoryRunEventStore()
+        return RunJournal("r-exh", "t-exh", store, flush_threshold=100)
+
+    def test_flags_reasoning_only_run(self):
+        j = self._journal()
+        j._llm_call_count = 2214
+        assert j.reasoning_exhausted_without_output() is True
+
+    def test_passes_when_tools_executed(self):
+        j = self._journal()
+        j._llm_call_count = 10
+        j._tool_execution_count = 5
+        assert j.reasoning_exhausted_without_output() is False
+
+    def test_passes_when_content_produced(self):
+        j = self._journal()
+        j._llm_call_count = 10
+        j._last_ai_msg = "here is your report"
+        assert j.reasoning_exhausted_without_output() is False
+
+    def test_passes_with_no_llm_calls(self):
+        j = self._journal()
+        assert j.reasoning_exhausted_without_output() is False

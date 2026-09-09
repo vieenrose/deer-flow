@@ -266,6 +266,11 @@ class RunJournal(BaseCallbackHandler):
         self._total_tokens = 0
         self._llm_call_count = 0
 
+        # Tool execution counter: incremented when a tool actually ran
+        # (ToolMessage or Command output). Used to detect reasoning-only
+        # runs that burned LLM calls without acting.
+        self._tool_execution_count = 0
+
         # Caller-bucketed token accumulators
         self._lead_agent_tokens = 0
         self._subagent_tokens = 0
@@ -578,6 +583,8 @@ class RunJournal(BaseCallbackHandler):
     def on_tool_end(self, output, *, run_id, parent_run_id=None, **kwargs):
         """Handle tool end event, append message and clear node data"""
         active_tool_name = self._active_tool_names.pop(str(run_id), None)
+        if isinstance(output, (ToolMessage, Command)):
+            self._tool_execution_count += 1
         try:
             if isinstance(output, ToolMessage):
                 msg = cast(ToolMessage, output)
@@ -1242,6 +1249,27 @@ class RunJournal(BaseCallbackHandler):
     @property
     def had_llm_error_fallback(self) -> bool:
         return self._had_llm_error_fallback
+
+    @property
+    def tool_execution_count(self) -> int:
+        return self._tool_execution_count
+
+    def reasoning_exhausted_without_output(self) -> bool:
+        """Detect the silent reasoning-exhaustion signature.
+
+        True when the model burned one or more LLM calls but never produced
+        user-facing content (``_last_ai_msg`` stays None) and never executed
+        a tool. Such runs previously sealed as ``success`` with HTTP 200
+        despite delivering nothing: reasoning truncated mid-stream,
+        ``finish_reason: stop``, zero content, zero tool calls, never
+        reaching a tools node. Callers should mark these runs failed
+        instead of reporting success.
+        """
+        if self._llm_call_count <= 0:
+            return False
+        if self._tool_execution_count > 0:
+            return False
+        return self._last_ai_msg is None or not self._last_ai_msg.strip()
 
     @property
     def llm_error_fallback_message(self) -> str | None:
