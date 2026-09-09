@@ -20,6 +20,7 @@ to the end of the message list as before_model + add_messages reducer would do.
 
 import json
 import logging
+import uuid
 from collections import defaultdict, deque
 from collections.abc import Awaitable, Callable
 from typing import override
@@ -28,6 +29,8 @@ from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
 from langchain_core.messages import ToolMessage
+from langgraph.prebuilt.tool_node import ToolCallRequest
+from langgraph.types import Command
 
 logger = logging.getLogger(__name__)
 
@@ -523,3 +526,51 @@ class DanglingToolCallMiddleware(AgentMiddleware[AgentState]):
         if patched is not None:
             request = request.override(messages=patched)
         return await handler(request)
+
+    @staticmethod
+    def _blank_name_recovery(tool_call: dict) -> ToolMessage | None:
+        """Short-circuit execution of tool calls with a missing/blank name.
+
+        Some providers (notably Qwen tool parsers) occasionally emit calls
+        like ``{"name": "", "args": {...}, "id": null}``. Without this
+        guard LangGraph's ToolNode rejects them and the whole run dies with
+        an error and no message in the stream. Returning a synthetic error
+        ToolMessage instead lets the model see the failure and retry with a
+        proper name.
+        """
+        if _valid_tool_name(tool_call.get("name")):
+            return None
+        call_id = tool_call.get("id")
+        if not _valid_tool_call_id(call_id):
+            call_id = f"{_SYNTHETIC_TOOL_CALL_ID_PREFIX}exec_{uuid.uuid4().hex[:12]}"
+        try:
+            args_detail = json.dumps(tool_call.get("args"))[:_MAX_RECOVERY_ERROR_DETAIL_LEN]
+        except (TypeError, ValueError):
+            args_detail = "?"
+        logger.warning(
+            "DanglingToolCallMiddleware: blank tool-call name intercepted (args=%s); returning synthetic error",
+            args_detail,
+        )
+        return ToolMessage(
+            content=f"{_EMPTY_TOOL_NAME_ERROR} Args received: {args_detail}",
+            name=_UNKNOWN_TOOL_NAME,
+            tool_call_id=call_id,
+        )
+
+    @override
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command],
+    ) -> ToolMessage | Command:
+        recovery = self._blank_name_recovery(request.tool_call)
+        return recovery if recovery is not None else handler(request)
+
+    @override
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        recovery = self._blank_name_recovery(request.tool_call)
+        return recovery if recovery is not None else await handler(request)
