@@ -16,6 +16,7 @@ import hashlib
 import logging
 import re
 import uuid
+from pathlib import Path
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -52,6 +53,8 @@ from deerflow.runtime.secret_context import redact_config_secrets, redact_metada
 from deerflow.runtime.user_context import get_effective_user_id
 from deerflow.utils.messages import ORIGINAL_USER_CONTENT_KEY, get_original_user_content_text, message_to_text
 from deerflow.utils.thread_id import ThreadId
+from deerflow.uploads.manager import list_files_in_dir
+from deerflow.utils.file_io import run_file_io
 from deerflow.workspace_changes import get_workspace_changes_response
 
 logger = logging.getLogger(__name__)
@@ -1742,6 +1745,35 @@ async def create_run_artifact_archive(
         },
         background=BackgroundTask(result.file.close),
     )
+
+
+class ThreadOutputsResponse(BaseModel):
+    """Files in a thread's agent outputs directory."""
+
+    files: list[dict]
+    count: int
+
+
+def _list_thread_output_files(thread_id: str, user_id: str) -> dict:
+    outputs_dir = get_paths().sandbox_outputs_dir(thread_id, user_id=user_id)
+    result = list_files_in_dir(outputs_dir)
+    for f in result["files"]:
+        f["path"] = str(Path("user-data") / "outputs" / f["filename"])
+    return result
+
+
+@router.get("/{thread_id}/outputs", response_model=ThreadOutputsResponse)
+@require_permission("runs", "read", owner_check=True)
+async def list_thread_outputs(thread_id: ThreadId, request: Request) -> ThreadOutputsResponse:
+    """List files in a thread's agent outputs directory.
+
+    deep-research runs write reports and artifacts to
+    ``user-data/outputs``, which previously had no read API (only the
+    per-run presented-artifacts archive). This mirrors ``/uploads/list``
+    so API clients can discover produced files directly.
+    """
+    result = await run_file_io(_list_thread_output_files, thread_id, get_effective_user_id())
+    return ThreadOutputsResponse(**result)
 
 
 @router.get("/{thread_id}/runs/{run_id}/events")
