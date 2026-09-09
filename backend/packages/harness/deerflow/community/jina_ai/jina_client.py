@@ -5,7 +5,17 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Default Jina Reader endpoint. Override with JINA_READER_BASE_URL to point
+# at a self-hosted Reader-compatible instance (e.g. http://localhost:8080)
+# and keep the whole fetch path local — no traffic to r.jina.ai then.
+DEFAULT_READER_BASE_URL = "https://r.jina.ai/"
+
 _api_key_warned = False
+
+
+def get_reader_base_url() -> str:
+    base_url = os.getenv("JINA_READER_BASE_URL", "").strip().rstrip("/")
+    return base_url or DEFAULT_READER_BASE_URL.rstrip("/")
 
 
 class JinaClient:
@@ -27,7 +37,7 @@ class JinaClient:
             if proxy:
                 client_kwargs["proxy"] = proxy
             async with httpx.AsyncClient(**client_kwargs) as client:
-                response = await client.post("https://r.jina.ai/", headers=headers, json=data, timeout=timeout)
+                response = await client.post(f"{get_reader_base_url()}/", headers=headers, json=data, timeout=timeout)
 
             if response.status_code != 200:
                 error_message = f"Jina API returned status {response.status_code}: {response.text}"
