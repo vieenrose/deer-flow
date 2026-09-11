@@ -28,7 +28,7 @@ services:
   # ── Redis Stream Bridge ────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: deer-flow-redis
+    container_name: deerflow2-redis
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
@@ -44,7 +44,7 @@ services:
   # ── Reverse Proxy ──────────────────────────────────────────────────────────
   nginx:
     image: nginx:alpine
-    container_name: deer-flow-nginx
+    container_name: deerflow2-nginx
     # Loopback-only by default: DeerFlow's agent can execute commands, so the
     # documented default deployment is a local trusted environment. A bare
     # "${PORT}:2026" would bind 0.0.0.0 instead, which does not match that.
@@ -75,7 +75,7 @@ services:
       args:
         PNPM_STORE_PATH: ${PNPM_STORE_PATH:-/root/.local/share/pnpm/store}
         NPM_REGISTRY: ${NPM_REGISTRY:-}
-    container_name: deer-flow-frontend
+    container_name: deerflow2-frontend
     environment:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
       - DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://gateway:8001
@@ -97,7 +97,7 @@ services:
         UV_EXTRAS: ${UV_EXTRAS:-}
         NPM_REGISTRY: ${NPM_REGISTRY:-}
         LARK_CLI_NPM_VERSION: ${LARK_CLI_NPM_VERSION:-1.0.65}
-    container_name: deer-flow-gateway
+    container_name: deerflow2-gateway
     # Gateway hosts the agent runtime with in-process RunManager + StreamBridge
     # singletons -- run state lives in this worker's memory. Default to a single
     # worker: the Redis stream bridge solves cross-worker SSE delivery and
@@ -127,6 +127,8 @@ services:
     working_dir: /app
     environment:
       - CI=true
+      - DEER_FLOW_AUTH_DISABLED=1  # local tailnet only: API callable without JWT (e.g. Claude Code skills)
+      - JINA_READER_BASE_URL=http://host.docker.internal:8089  # local-reader: zero cloud fetch traffic
       - DEER_FLOW_PROJECT_ROOT=/app
       - DEER_FLOW_HOME=/app/backend/.deer-flow
       - DEER_FLOW_CONFIG_PATH=/app/backend/config.yaml
@@ -169,7 +171,7 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-    container_name: deer-flow-provisioner
+    container_name: deerflow2-provisioner
     volumes:
       - ~/.kube/config:/root/.kube/config:ro
     environment:
