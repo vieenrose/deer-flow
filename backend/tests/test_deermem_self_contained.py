@@ -930,3 +930,22 @@ def test_from_backend_config_null_values_do_not_warn_as_unknown(caplog):
     with caplog.at_level("WARNING", logger=cfg_logger):
         DeerMemConfig.from_backend_config({"model": None})
     assert not any("Unknown backend_config keys" in r.message for r in caplog.records)
+
+
+def test_update_fact_content_refreshes_stored_title(deermem_data_dir):
+    """Regression: the Markdown ``# title`` heading is parsed back as an
+    explicit title, so updating a fact's content left the old (wrong) text in
+    the title on disk and in the memory document."""
+    import json
+
+    dm = _deermem_with_fake_llm(backend_config={"storage_path": str(deermem_data_dir)})
+    _, fid = dm.create_fact("Old wrong spec claim", user_id="u1")
+
+    dm.update_fact(fid, content="Corrected claim", user_id="u1")
+    dm.reload_memory(user_id="u1")
+
+    fact = next(f for f in dm.get_memory(user_id="u1")["facts"] if f["id"] == fid)
+    assert fact["content"] == "Corrected claim"
+    assert "Old wrong" not in json.dumps(fact)
+    fact_files = [p for p in deermem_data_dir.rglob(f"{fid}.md")]
+    assert fact_files and all("Old wrong" not in p.read_text(encoding="utf-8") for p in fact_files)

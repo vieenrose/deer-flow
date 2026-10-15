@@ -1254,6 +1254,9 @@ class MemoryUpdater:
                 if not normalized_content:
                     raise ValueError("content")
                 updated_fact["content"] = normalized_content
+                # The stored title is derived from the old content; drop it so
+                # storage re-derives it instead of persisting the stale text.
+                updated_fact.pop("title", None)
             if category is not None:
                 updated_fact["category"] = category.strip() or "context"
             if confidence is not None:
@@ -1280,6 +1283,7 @@ class MemoryUpdater:
                     if not normalized_content:
                         raise ValueError("content")
                     updated_fact["content"] = normalized_content
+                    updated_fact.pop("title", None)
                 if category is not None:
                     updated_fact["category"] = category.strip() or "context"
                 if confidence is not None:
