@@ -56,6 +56,8 @@ messages:
       - Only facts classified as scope="user", durability="durable", authority="descriptive" are eligible for storage.
       - Do not create facts for current-task objectives, acceptance criteria, workspace state, exact current file/commit/error state, project-only constraints, or one-time action permissions.
       - Extract specific, quantifiable details (e.g., "16k+ GitHub stars", "200+ datasets")
+      - Facts describe the USER. Do NOT store third-party product specs, prices, benchmarks, bandwidth or core counts, or release dates as facts or in summaries: they go stale and are often the assistant's own unverified claims. Record only that the user is researching or comparing those products.
+      - Never turn the assistant's own claims into facts. Category "correction" requires the user to correct something; the assistant correcting itself or disputing the user is not a correction.
       - Include proper nouns (company names, project names, technology names)
       - Preserve technical terminology and version numbers
       - Categories:

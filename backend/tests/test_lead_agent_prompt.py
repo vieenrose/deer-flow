@@ -725,3 +725,25 @@ def test_apply_prompt_template_deferred_path_mentions_describe_skill(monkeypatch
     assert "describe_skill(name)" in prompt
     # Must NOT contain the legacy wording
     assert "Always load the relevant skill" not in prompt
+
+
+def test_apply_prompt_template_requires_search_before_disputing_product_facts(monkeypatch):
+    """Regression: a local model disputed that a real product config existed,
+    citing stale injected memory as "my research", then treated the user's
+    "1." reply to its own numbered options as a cut-off message."""
+    config = SimpleNamespace(
+        sandbox=SimpleNamespace(mounts=[]),
+        skills=SimpleNamespace(container_path="/mnt/skills", use="deerflow.skills.storage.local_skill_storage:LocalSkillStorage", get_skills_path=lambda: Path("/tmp/skills")),
+    )
+    monkeypatch.setattr("deerflow.config.get_app_config", lambda: config)
+    monkeypatch.setattr(prompt_module, "_get_enabled_skills", lambda: [])
+    monkeypatch.setattr(prompt_module, "get_deferred_tools_prompt_section", lambda **kwargs: "")
+    monkeypatch.setattr(prompt_module, "_build_acp_section", lambda **kwargs: "")
+    monkeypatch.setattr(prompt_module, "_get_memory_context", lambda agent_name=None, **kwargs: "")
+    monkeypatch.setattr(prompt_module, "get_agent_soul", lambda agent_name=None, **kwargs: "")
+
+    prompt = prompt_module.apply_prompt_template()
+
+    assert "DO NOT ask whether a product, model, spec or name exists or is correct" in prompt
+    assert "IS the user's choice" in prompt
+    assert "**Memory is not a source**" in prompt
